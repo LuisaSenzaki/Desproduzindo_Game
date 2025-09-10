@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Palavras que Caem – Protótipo</title>
+  <style>
+    :root{
+      --bg: #0f1226; /* fundo escuro azulado */
+      --ink: #e8ecff;
+      --ink-dim: #b9c2ff;
+      --accent: #7c99ff;
+      --good: #47d67b;
+      --bomb: #ff6b6b;
+      --panel: rgba(255,255,255,.08);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 16px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; background-color: black;
+      color:var(--ink); font: 500 16px/1.45 system-ui, Segoe UI, Roboto, Helvetica, Arial;
+      height:100dvh; display:grid; place-items:center;
+    }
+    .wrap{ width:min(100vw, 1920px); height:min(100dvh, 1080px); position:relative; }
+    canvas{ width:100%; height:100%; display:block; background-image: url("./assets/bg-desproduzindo.png"); background-size: cover; background-repeat: no-repeat; background-position: center;
+      border-radius: var(--radius); box-shadow: var(--shadow); }
+
+    .hud{ position:absolute; inset:0; pointer-events:none; padding:12px; display:flex; flex-direction:column; gap:8px; }
+    .topbar{ display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    .badge{ pointer-events:auto; background:var(--panel); padding:8px 12px; border-radius:999px; backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.12); }
+    .score{ font-weight:800; letter-spacing:.3px; }
+    .legend{ display:flex; gap:8px; align-items:center; color:var(--ink-dim); font-size:14px; }
+    .legend .dot{ width:10px; height:10px; border-radius:50%; display:inline-block; }
+
+    .controls{ pointer-events:auto; position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:8px; }
+    .btn{ background:var(--accent); color:#0b0f24; font-weight:800; border:none; padding:10px 14px; border-radius:12px; cursor:pointer; box-shadow: var(--shadow); transition:.2s transform;
+    }
+    .btn:active{ transform: translateY(1px) }
+    .btn.secondary{ background: var(--panel); color:var(--ink); border:1px solid rgba(255,255,255,.14) }
+
+    .modal{ pointer-events:auto; position:absolute; inset:0; display:none; place-items:center; background: rgba(0,0,0,.4); }
+    .modal.open{ display:grid }
+    .card{ width:min(92vw, 700px); background:#121533; color:var(--ink); border:1px solid rgba(255,255,255,.12); border-radius: 18px; box-shadow: var(--shadow); padding:18px; }
+    .card h2{ margin:6px 0 12px; }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    textarea, input{ width:100%; background:#0f1330; color:var(--ink); border:1px solid rgba(255,255,255,.16); border-radius:12px; padding:10px; min-height:120px; font: inherit; }
+    input[type="number"]{ min-height:auto }
+    label{ display:block; font-size:13px; color:var(--ink-dim); margin-bottom:6px }
+    .card .row{ display:flex; gap:12px; align-items:center; }
+
+    .toast{ position:absolute; left:50%; top:18px; transform: translateX(-50%); background: var(--panel); border:1px solid rgba(255,255,255,.18); color:var(--ink); padding:8px 12px; border-radius:999px; display:none }
+    .toast.show{ display:block }
+
+    /* Touch arrows (mobile) */
+    .touch{ position:absolute; inset:auto 0 64px 0; display:flex; justify-content:space-between; padding:0 16px; pointer-events:none; }
+    .tbtn{ pointer-events:auto; width:64px; height:64px; border-radius:50%; background:var(--panel); border:1px solid rgba(255,255,255,.16); display:grid; place-items:center; font-size:24px; user-select:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="1024" height="720" aria-label="Campo de jogo"></canvas>
+    <div class="hud" aria-live="polite">
+      <div class="topbar">
+        <div class="badge score" id="score">Pontuação: 0</div>
+        <div class="legend badge">
+          <span class="dot" style="background:var(--good)"></span>&nbsp;Palavra Válida
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <span class="dot" style="background:var(--bomb)"></span>&nbsp;Bomba
+        </div>
+        <div class="badge" id="timer">Tempo: 60s</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="startBtn">▶ Iniciar</button>
+      <button class="btn secondary" id="pauseBtn">⏸ Pausar</button>
+      <button class="btn secondary" id="settingsBtn">⚙️ Configurar</button>
+      <button class="btn secondary" id="restartBtn">🔁 Reiniciar</button>
+    </div>
+
+    <div class="touch" id="touchControls" hidden>
+      <div class="tbtn" id="leftBtn">◀</div>
+      <div class="tbtn" id="rightBtn">▶</div>
+    </div>
+
+    <div class="modal" id="settingsModal" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Configurações do Jogo</h2>
+        <p style="margin-top:-4px; color:var(--ink-dim)">Cole aqui suas listas de palavras e ajuste a pontuação. Cada palavra por linha.</p>
+        <div class="grid">
+          <div>
+            <label for="goodWords">Palavras Válidas (ganham pontos)</label>
+            <textarea id="goodWords"></textarea>
+          </div>
+          <div>
+            <label for="bombWords">Palavras Bomba (perdem pontos)</label>
+            <textarea id="bombWords"></textarea>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1">
+            <label for="pointsGood">Pontos por acerto</label>
+            <input id="pointsGood" type="number" value="10" />
+          </div>
+          <div style="flex:1">
+            <label for="pointsBomb">Pontos por bomba</label>
+            <input id="pointsBomb" type="number" value="-20" />
+          </div>
+          <div style="flex:1">
+            <label for="duration">Duração (segundos)</label>
+            <input id="duration" type="number" value="60" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px; justify-content:flex-end">
+          <button class="btn secondary" id="closeSettings">Cancelar</button>
+          <button class="btn" id="saveSettings">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+<script>
+// ============================
+// \ Configuração RÁPIDA /
+// ============================
+// Se você já tem as listas e pontuações definidas, 
+// pode inserir diretamente aqui ou usar a tela ⚙️ Configurar.
+const DEFAULT_GOOD = [
+  "organização", "briefing", "roteiro", "pauta", "logística",
+  "cronograma", "orçamento", "checklist", "fornecedor", "pós-evento"
+];
+const DEFAULT_BOMBS = [
+  "procrastinar", "atraso", "desfoco", "improviso", "overbudget"
+];
+let POINTS = { correct: 10, bomb: -20 };
+let GAME_DURATION = 60; // em segundos
+
+// ============================
+// Utilidades
+// ============================
+const $ = (q) => document.querySelector(q);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => Math.random() * (b - a) + a;
+const choice = (arr) => arr[(Math.random() * arr.length) | 0];
+
+function showToast(msg){
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=> t.classList.remove('show'), 1200);
+}
+
+// ============================
+// Jogo
+// ============================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
+
+const state = {
+  running: false,
+  paused: false,
+  timeLeft: GAME_DURATION,
+  score: 0,
+  words: [],
+  spawnTimer: 0,
+  spawnEvery: 650, // ms
+  lastTime: 0,
+  goodList: DEFAULT_GOOD.slice(),
+  bombList: DEFAULT_BOMBS.slice(),
+};
+
+const player = {
+  x: W/2, y: H-60, w: 120, h: 24, speed: 520, vx: 0,
+};
+
+function resetGame(){
+  state.running = false;
+  state.paused = false;
+  state.timeLeft = GAME_DURATION;
+  state.score = 0;
+  state.words = [];
+  state.spawnTimer = 0;
+  player.x = W/2; player.vx = 0;
+  updateHUD();
+}
+
+function startGame(){
+  if(!state.running){ state.lastTime = performance.now(); }
+  state.running = true; state.paused = false;
+}
+function pauseGame(){ state.paused = !state.paused; }
+
+function endGame(){
+  state.running = false; state.paused = false;
+  showToast(`Fim de jogo! Pontuação final: ${state.score}`);
+}
+
+function updateHUD(){
+  document.getElementById('score').textContent = `Pontuação: ${state.score}`;
+  document.getElementById('timer').textContent = `Tempo: ${Math.max(0, Math.ceil(state.timeLeft))}s`;
+}
+
+function spawnWord(){
+  const isBomb = Math.random() < 0.25 && state.bombList.length; // 25% bombas
+  const text = isBomb ? choice(state.bombList) : choice(state.goodList);
+  const speed = rand(120, 220); // px/s
+  const w = measureTextWidth(text, isBomb);
+  const x = clamp(rand(20, W - w - 20), 8, W - w - 8);
+  state.words.push({ text, isBomb, x, y: -30, speed });
+}
+
+function measureTextWidth(text, isBomb){
+  ctx.font = isBomb ? 'bold 24px system-ui' : '600 24px system-ui';
+  return ctx.measureText(text).width + 22; // padding visual
+}
+
+function aabb(ax, ay, aw, ah, bx, by, bw, bh){
+  return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+}
+
+function drawBackground(){
+  // estrelas simples
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  for(let i=0;i<40;i++){
+    const x = (i*97 % W), y = (i*53 % H);
+    ctx.fillStyle = '#c9d1ff';
+    ctx.fillRect(x, y, 2, 2);
+  }
+  ctx.restore();
+
+  // chão
+  ctx.fillStyle = '#0a0d22';
+  ctx.fillRect(0, H-36, W, 36);
+}
+
+function drawPlayer(){
+  // base (uma "cesta" futurista)
+  ctx.fillStyle = '#7c99ff';
+  roundRect(ctx, player.x, player.y, player.w, player.h, 10);
+  ctx.fill();
+}
+
+function drawWord(w){
+  // cápsula
+  ctx.save();
+  ctx.translate(w.x, w.y);
+  const capsuleW = measureTextWidth(w.text, w.isBomb);
+  const capsuleH = 34;
+  ctx.fillStyle = w.isBomb ? 'rgba(255,107,107,.9)' : 'rgba(71,214,123,.9)';
+  roundRect(ctx, 0, 0, capsuleW, capsuleH, 14); ctx.fill();
+  ctx.fillStyle = '#0b0f24';
+  ctx.font = w.isBomb ? 'bold 20px system-ui' : '700 20px system-ui';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(w.text, 12, capsuleH/2 + 1);
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+function loop(now){
+  const dt = (now - state.lastTime) / 1000;
+  state.lastTime = now;
+
+  if(state.running && !state.paused){
+    // tempo
+    state.timeLeft -= dt; if(state.timeLeft <= 0){ state.timeLeft = 0; endGame(); }
+
+    // spawn
+    state.spawnTimer += dt*1000; 
+    const spawnEvery = clamp(state.spawnEvery - (60 - state.timeLeft)*3, 420, 800); // acelera levemente
+    while(state.spawnTimer >= spawnEvery){ state.spawnTimer -= spawnEvery; spawnWord(); }
+
+    // atualização player
+    player.x += player.vx * dt; player.x = clamp(player.x, 8, W - player.w - 8);
+
+    // atualizar palavras
+    for(let i = state.words.length - 1; i >= 0; i--){
+      const w = state.words[i];
+      w.y += w.speed * dt;
+      // colisão
+      if(aabb(w.x, w.y, measureTextWidth(w.text, w.isBomb), 34, player.x, player.y, player.w, player.h)){
+        state.words.splice(i,1);
+        if(w.isBomb){
+          state.score += POINTS.bomb;
+          shake();
+        } else {
+          state.score += POINTS.correct;
+        }
+        updateHUD();
+      } else if(w.y > H){
+        state.words.splice(i,1);
+      }
+    }
+  }
+
+  // render
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+  for(const w of state.words) drawWord(w);
+  drawPlayer();
+
+  updateHUD();
+  requestAnimationFrame(loop);
+}
+
+function shake(){
+  // vibração simples no canvas
+  const mag = 6; const t = 120; const start = performance.now();
+  const id = setInterval(()=>{
+    const p = (performance.now() - start)/t;
+    if(p>=1){ clearInterval(id); canvas.style.transform = ''; return; }
+    const dx = (Math.random()*2-1)*mag, dy = (Math.random()*2-1)*mag;
+    canvas.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, 16);
+}
+
+// ============================
+// Entrada (teclado + toque)
+// ============================
+const keys = { left:false, right:false };
+function setVx(){ player.vx = (keys.left? -1:0 + keys.right? 1:0); player.vx *= player.speed; }
+
+document.addEventListener('keydown', (e)=>{
+  if(['ArrowLeft','a','A'].includes(e.key)) { keys.left = true; setVx(); }
+  if(['ArrowRight','d','D'].includes(e.key)) { keys.right = true; setVx(); }
+  if(e.key === ' '){ e.preventDefault(); state.running ? pauseGame() : startGame(); }
+});
+
+document.addEventListener('keyup', (e)=>{
+  if(['ArrowLeft','a','A'].includes(e.key)) { keys.left = false; setVx(); }
+  if(['ArrowRight','d','D'].includes(e.key)) { keys.right = false; setVx(); }
+});
+
+// Controles touch
+const touchControls = document.getElementById('touchControls');
+function isTouch(){ return window.matchMedia('(pointer: coarse)').matches; }
+function bindTouch(btn, dir){
+  let pressing=false; const on=(e)=>{ e.preventDefault(); pressing=true; keys[dir]=true; setVx(); };
+  const off=(e)=>{ e.preventDefault(); pressing=false; keys[dir]=false; setVx(); };
+  btn.addEventListener('touchstart', on, {passive:false});
+  btn.addEventListener('touchend', off, {passive:false});
+  btn.addEventListener('touchcancel', off, {passive:false});
+}
+bindTouch(document.getElementById('leftBtn'), 'left');
+bindTouch(document.getElementById('rightBtn'), 'right');
+
+// ============================
+// UI Botões / Modal
+// ============================
+$('#startBtn').onclick = ()=> startGame();
+$('#pauseBtn').onclick = ()=> { pauseGame(); showToast(state.paused? 'Jogo pausado' : 'Continuando'); };
+$('#restartBtn').onclick = ()=> { resetGame(); showToast('Reiniciado'); };
+$('#settingsBtn').onclick = ()=> openSettings();
+$('#closeSettings').onclick = ()=> closeSettings();
+$('#saveSettings').onclick = ()=> saveSettings();
+
+function openSettings(){
+  $('#goodWords').value = state.goodList.join('\n');
+  $('#bombWords').value = state.bombList.join('\n');
+  $('#pointsGood').value = POINTS.correct;
+  $('#pointsBomb').value = POINTS.bomb;
+  $('#duration').value = GAME_DURATION;
+  $('#settingsModal').classList.add('open');
+}
+function closeSettings(){ $('#settingsModal').classList.remove('open'); }
+function saveSettings(){
+  const g = $('#goodWords').value.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const b = $('#bombWords').value.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const pg = parseInt($('#pointsGood').value || '0', 10);
+  const pb = parseInt($('#pointsBomb').value || '0', 10);
+  const dur = parseInt($('#duration').value || '60', 10);
+  if(g.length){ state.goodList = g; }
+  if(b.length){ state.bombList = b; }
+  POINTS.correct = isFinite(pg)? pg : POINTS.correct;
+  POINTS.bomb = isFinite(pb)? pb : POINTS.bomb;
+  GAME_DURATION = isFinite(dur)? dur : GAME_DURATION;
+  resetGame(); closeSettings(); showToast('Configurações salvas');
+}
+
+// Responsivo: mostra controles touch em telas de toque
+function onResize(){
+  const isT = isTouch();
+  document.getElementById('touchControls').hidden = !isT;
+}
+window.addEventListener('resize', onResize); onResize();
+
+// Inicialização
+resetGame();
+requestAnimationFrame((t)=>{ state.lastTime = t; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
